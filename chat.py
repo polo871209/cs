@@ -144,7 +144,6 @@ Generate only a concise title without quotes or extra text."""
                 session_name = self.generate_session_name(user_input, ai_response)
                 if session_name:  # Only update if we got a valid name
                     self.db.update_session_name(self.session_id, session_name)
-                    print(f"📝 Session named: '{session_name}'")
             return ai_response
 
         except Exception as e:
@@ -161,11 +160,7 @@ Generate only a concise title without quotes or extra text."""
             print("📝 No conversation history for this session.")
             return
 
-        session_display = (
-            session_info.get("session_name", self.session_id)
-            if session_info
-            else self.session_id
-        )
+        session_display = session_info.session_name if session_info else self.session_id
         print(f"\n📋 Conversation History: {session_display}")
         print("-" * 60)
         for msg in history:
@@ -184,8 +179,7 @@ Generate only a concise title without quotes or extra text."""
 
         print("\n📚 Available Sessions:")
         for i, session in enumerate(sessions, 1):
-            name = session["session_name"]
-            print(f"{i}. {name}")
+            print(f"{i}. {session.session_name}")
 
     def switch_session(self):
         """Allow user to switch to a different session"""
@@ -197,11 +191,10 @@ Generate only a concise title without quotes or extra text."""
         # Show available sessions with current session marked
         print("\n📚 Available Sessions:")
         for i, session in enumerate(sessions, 1):
-            name = session["session_name"]
             current_marker = (
-                " ← Current" if session["session_id"] == self.session_id else ""
+                " ← Current" if session.session_name == self.session_id else ""
             )
-            print(f"{i}. {name}{current_marker}")
+            print(f"{i}. {session.session_name}{current_marker}")
 
         try:
             choice = input(
@@ -214,10 +207,10 @@ Generate only a concise title without quotes or extra text."""
             session_index = int(choice) - 1
             if 0 <= session_index < len(sessions):
                 selected_session = sessions[session_index]
-                self.session_id = selected_session["session_id"]
+                self.session_id = selected_session.session_id
 
                 # Show session info
-                session_name = selected_session["session_name"]
+                session_name = selected_session.session_name
                 print(f"✅ Switched to session: '{session_name}'")
                 print(f"🆔 Session ID: {self.session_id}")
 
@@ -246,24 +239,47 @@ Generate only a concise title without quotes or extra text."""
         except Exception as e:
             print(f"❌ Error switching session: {str(e)}")
 
+    def show_current_session(self):
+        """Show information about the current session"""
+        session_info = self.db.get_session_info(self.session_id)
+
+        if not session_info:
+            print("❌ Current session not found.")
+            return
+
+        print("\n📋 Current Session Information:")
+        print("-" * 40)
+        print(f"📝 Name: {session_info.session_name}")
+        print(f"🆔 ID: {self.session_id}")
+        print(f"📅 Created: {session_info.created_at}")
+
+        # Show message count
+        history = self.db.get_conversation_history(self.session_id)
+        message_count = len(history)
+        print(f"💬 Messages: {message_count}")
+
+        if message_count > 0:
+            print(f"⏰ Last activity: {history[-1]['timestamp']}")
+        print()
+
     def start_chat_loop(self):
         """Start the interactive chat loop"""
         # Show initial session info
         session_info = self.db.get_session_info(self.session_id)
-        current_session_name = (
-            session_info.get("session_name", "New Session")
-            if session_info
-            else "New Session"
-        )
+
+        if not session_info:
+            print("❌ Current session not found. Please create a new session first.")
+            return
 
         print("🚀 AI Chat with Memory Started!")
         print(f"💾 Database: {self.db.db_path}")
-        print(f"📝 Current Session: {current_session_name}")
+        print(f"📝 Current Session: {session_info.session_name}")
         print(f"🆔 Session ID: {self.session_id}")
         print("\nCommands:")
         print("  /history - Show conversation history")
         print("  /sessions - List all sessions")
         print("  /switch - Switch to different session")
+        print("  /current - Show current session info")
         print("  /new - Start new session")
         print("  /clear - Clear current session")
         print("  /quit or /exit - Exit chat")
@@ -273,53 +289,54 @@ Generate only a concise title without quotes or extra text."""
             try:
                 # Show current session name in prompt
                 session_info = self.db.get_session_info(self.session_id)
-                current_session_name = session_info["session_name"]
-                if not current_session_name:
-                    current_session_name = "New Session"
-                # Truncate long session names for prompt
-                prompt_name = (
-                    current_session_name[:20] + "..."
-                    if len(current_session_name) > 20
-                    else current_session_name
-                )
 
-                user_input = input(f"\n👤 You ({prompt_name}): ").strip()
+                if not session_info:
+                    print("❌ Unexpected error: Session not found")
+                    break
+
+                user_input = input("\n👤 You: ").strip()
 
                 if not user_input:
                     continue
 
                 # Handle commands
-                if user_input.lower() in ["/quit", "/exit"]:
-                    print("👋 Goodbye!")
-                    break
-                elif user_input.lower() == "/history":
-                    self.show_conversation_history()
-                    continue
-                elif user_input.lower() == "/sessions":
-                    self.list_all_sessions()
-                    continue
-                elif user_input.lower() == "/switch":
-                    self.switch_session()
-                    continue
-                elif user_input.lower() == "/new":
-                    self.session_id = self.create_new_session()
-                    print("✅ Now in new session")
-                    continue
-                elif user_input.lower() == "/clear":
-                    confirm = (
-                        input("⚠️ Are you sure you want to clear this session? (y/N): ")
-                        .strip()
-                        .lower()
-                    )
-                    if confirm in ["y", "yes"]:
-                        self.db.clear_session(self.session_id)
-                        print("🗑️ Session cleared!")
-                        # Create a new session
+                match user_input.lower():
+                    case "/quit" | "/exit":
+                        print("👋 Goodbye!")
+                        break
+                    case "/history":
+                        self.show_conversation_history()
+                        continue
+                    case "/sessions":
+                        self.list_all_sessions()
+                        continue
+                    case "/switch":
+                        self.switch_session()
+                        continue
+                    case "/current":
+                        self.show_current_session()
+                        continue
+                    case "/new":
                         self.session_id = self.create_new_session()
-                        print("✅ Started fresh session")
-                    else:
-                        print("❌ Clear cancelled.")
-                    continue
+                        print("✅ Now in new session")
+                        continue
+                    case "/clear":
+                        confirm = (
+                            input(
+                                "⚠️ Are you sure you want to clear this session? (y/N): "
+                            )
+                            .strip()
+                            .lower()
+                        )
+                        if confirm in ["y", "yes"]:
+                            self.db.clear_session(self.session_id)
+                            print("🗑️ Session cleared!")
+                            # Create a new session
+                            self.session_id = self.create_new_session()
+                            print("✅ Started fresh session")
+                        else:
+                            print("❌ Clear cancelled.")
+                        continue
 
                 # Send message to AI
                 print("🤖 AI: ", end="", flush=True)

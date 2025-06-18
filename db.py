@@ -4,11 +4,12 @@ from typing import Dict, List, Optional
 
 
 @dataclass
-class SessionSummary:
+class Session:
     session_id: str
     session_name: str
     created_at: str
-    message_count: int
+    updated_at: str
+    message_count: int | None = 0
 
 
 class ConversationDB:
@@ -30,8 +31,7 @@ class ConversationDB:
         # Create sessions table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT UNIQUE NOT NULL,
+                session_id TEXT PRIMARY KEY,
                 session_name TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -97,7 +97,7 @@ class ConversationDB:
         conn.commit()
         conn.close()
 
-    def get_session_info(self, session_id: str) -> Dict | None:
+    def get_session_info(self, session_id: str) -> Session | None:
         """Get session information"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -115,12 +115,12 @@ class ConversationDB:
         conn.close()
 
         if row:
-            return {
-                "session_id": row[0],
-                "session_name": row[1],
-                "created_at": row[2],
-                "updated_at": row[3],
-            }
+            return Session(
+                session_id=row[0],
+                session_name=row[1] or row[0],  # Fallback to session_id if no name
+                created_at=row[2],
+                updated_at=row[3],
+            )
         return None
 
     def add_message(self, session_id: str, role: str, content: str):
@@ -178,12 +178,12 @@ class ConversationDB:
         conn.commit()
         conn.close()
 
-    def get_all_sessions(self) -> List[Dict]:
+    def get_all_sessions(self) -> List[Session]:
         """Get all sessions with their names"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT s.session_id, s.session_name, s.created_at, 
+            """SELECT s.session_id, s.session_name, s.created_at, s.updated_at,
                COUNT(c.id) as message_count
                FROM sessions s 
                LEFT JOIN conversations c ON s.session_id = c.session_id
@@ -194,11 +194,12 @@ class ConversationDB:
         conn.close()
 
         return [
-            {
-                "session_id": row[0],
-                "session_name": row[1] or row[0],  # Fallback to session_id if no name
-                "created_at": row[2],
-                "message_count": row[3],
-            }
+            Session(
+                session_id=row[0],
+                session_name=row[1] or row[0],  # Fallback to session_id if no name
+                created_at=row[2],
+                updated_at=row[3],
+                message_count=row[4],
+            )
             for row in rows
         ]
