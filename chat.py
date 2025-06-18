@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from google import genai
+from google.genai import types
 
 from db import ConversationDB
 
@@ -18,45 +19,132 @@ class AIChat:
     def create_new_session(self) -> str:
         """Create a new unique session ID"""
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        # Create session in database
+        self.db.create_session(session_id)
         print(f"🆕 New session created: {session_id}")
         return session_id
 
-    def format_conversation_context(self) -> str:
-        """Get conversation history and format for API"""
+    def generate_session_name(self, user_input: str, ai_response: str) -> str:
+        """Generate a session name based on the first conversation"""
+        try:
+            # Ensure inputs are not None
+            if not user_input or not ai_response:
+                return "New Conversation"
+
+            # Create a prompt to generate a short summary
+            summary_prompt = f"""Based on this conversation, create a short 3-5 word title:
+User: {user_input}
+AI: {ai_response}
+
+Generate only a concise title without quotes or extra text."""
+
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_text(text=summary_prompt),
+                    ],
+                )
+            ]
+
+            config = types.GenerateContentConfig(
+                response_mime_type="text/plain",
+            )
+
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=contents,
+                config=config,
+            )
+
+            # Clean up the response
+            if response and hasattr(response, "text") and response.text:
+                session_name = response.text.strip().replace('"', "").replace("'", "")
+                # Ensure we have a valid string
+                if not session_name or len(session_name.strip()) == 0:
+                    session_name = "New Conversation"
+            else:
+                session_name = "New Conversation"
+
+            # Limit to reasonable length
+            if len(session_name) > 50:
+                session_name = session_name[:47] + "..."
+
+            return session_name
+
+        except Exception as e:
+            print(f"⚠️ Could not generate session name: {e}")
+            # Fallback to first few words of user input
+            if user_input:
+                words = user_input.split()[:3]
+                return " ".join(words) + ("..." if len(user_input.split()) > 3 else "")
+            else:
+                return "New Conversation"
+
+    def build_conversation_contents(self, user_input: str) -> list:
+        """Build conversation contents using genai types structure"""
         history = self.db.get_conversation_history(self.session_id)
 
-        if not history:
-            return ""
+        contents = []
 
-        context = "Previous conversation:\n"
+        # Add conversation history
         for msg in history:
-            role = "Human" if msg["role"] == "user" else "Assistant"
-            context += f"{role}: {msg['content']}\n"
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append(
+                types.Content(
+                    role=role,
+                    parts=[
+                        types.Part.from_text(text=msg["content"]),
+                    ],
+                )
+            )
 
-        context += "\nCurrent conversation:\n"
-        return context
+        # Add current user input
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=user_input),
+                ],
+            )
+        )
+
+        return contents
 
     def send_message(self, user_input: str) -> str:
         """Send message to AI and store in database"""
-        # Get conversation context
-        context = self.format_conversation_context()
+        # Build conversation contents with proper structure
+        contents = self.build_conversation_contents(user_input)
 
-        # Prepare the full prompt with context
-        full_prompt = context + f"Human: {user_input}\nAssistant:"
+        # Configure response format
+        generate_content_config = types.GenerateContentConfig(
+            response_mime_type="text/plain",
+        )
 
         try:
             # Get AI response
             response = self.client.models.generate_content(
                 model="gemini-2.0-flash",
-                contents=full_prompt if context else user_input,
+                contents=contents,
+                config=generate_content_config,
             )
 
             ai_response = response.text
+
+            if not ai_response:
+                ai_response = ""
 
             # Store both messages in database
             self.db.add_message(self.session_id, "user", user_input)
             self.db.add_message(self.session_id, "assistant", ai_response)
 
+            # Generate session name if this is the first message in the session
+            history = self.db.get_conversation_history(self.session_id)
+            if len(history) == 2:  # First user message + first AI response
+                session_name = self.generate_session_name(user_input, ai_response)
+                if session_name:  # Only update if we got a valid name
+                    self.db.update_session_name(self.session_id, session_name)
+                    print(f"📝 Session named: '{session_name}'")
             return ai_response
 
         except Exception as e:
@@ -67,12 +155,18 @@ class AIChat:
     def show_conversation_history(self):
         """Display current session's conversation history"""
         history = self.db.get_conversation_history(self.session_id)
+        session_info = self.db.get_session_info(self.session_id)
 
         if not history:
             print("📝 No conversation history for this session.")
             return
 
-        print(f"\n📋 Conversation History (Session: {self.session_id}):")
+        session_display = (
+            session_info.get("session_name", self.session_id)
+            if session_info
+            else self.session_id
+        )
+        print(f"\n📋 Conversation History: {session_display}")
         print("-" * 60)
         for msg in history:
             role_emoji = "👤" if msg["role"] == "user" else "🤖"
@@ -90,23 +184,106 @@ class AIChat:
 
         print("\n📚 Available Sessions:")
         for i, session in enumerate(sessions, 1):
-            print(f"{i}. {session}")
+            name = session["session_name"]
+            print(f"{i}. {name}")
+
+    def switch_session(self):
+        """Allow user to switch to a different session"""
+        sessions = self.db.get_all_sessions()
+        if not sessions:
+            print("📝 No previous sessions found.")
+            return
+
+        # Show available sessions with current session marked
+        print("\n📚 Available Sessions:")
+        for i, session in enumerate(sessions, 1):
+            name = session["session_name"]
+            current_marker = (
+                " ← Current" if session["session_id"] == self.session_id else ""
+            )
+            print(f"{i}. {name}{current_marker}")
+
+        try:
+            choice = input(
+                "\nEnter session number to switch (or press Enter to cancel): "
+            ).strip()
+            if not choice:
+                print("❌ Switch cancelled.")
+                return
+
+            session_index = int(choice) - 1
+            if 0 <= session_index < len(sessions):
+                selected_session = sessions[session_index]
+                self.session_id = selected_session["session_id"]
+
+                # Show session info
+                session_name = selected_session["session_name"]
+                print(f"✅ Switched to session: '{session_name}'")
+                print(f"🆔 Session ID: {self.session_id}")
+
+                # Show recent conversation from this session
+                recent_history = self.db.get_conversation_history(
+                    self.session_id, limit=3
+                )
+                if recent_history:
+                    print("\n📖 Recent conversation:")
+                    for msg in recent_history[-3:]:  # Last 3 messages
+                        role_emoji = "👤" if msg["role"] == "user" else "🤖"
+                        role_name = "You" if msg["role"] == "user" else "AI"
+                        # Truncate long messages for preview
+                        content = (
+                            msg["content"][:100] + "..."
+                            if len(msg["content"]) > 100
+                            else msg["content"]
+                        )
+                        print(f"   {role_emoji} {role_name}: {content}")
+                    print()
+            else:
+                print("❌ Invalid session number.")
+
+        except ValueError:
+            print("❌ Please enter a valid number.")
+        except Exception as e:
+            print(f"❌ Error switching session: {str(e)}")
 
     def start_chat_loop(self):
         """Start the interactive chat loop"""
+        # Show initial session info
+        session_info = self.db.get_session_info(self.session_id)
+        current_session_name = (
+            session_info.get("session_name", "New Session")
+            if session_info
+            else "New Session"
+        )
+
         print("🚀 AI Chat with Memory Started!")
         print(f"💾 Database: {self.db.db_path}")
+        print(f"📝 Current Session: {current_session_name}")
         print(f"🆔 Session ID: {self.session_id}")
         print("\nCommands:")
         print("  /history - Show conversation history")
         print("  /sessions - List all sessions")
+        print("  /switch - Switch to different session")
         print("  /new - Start new session")
+        print("  /clear - Clear current session")
         print("  /quit or /exit - Exit chat")
         print("-" * 60)
 
         while True:
             try:
-                user_input = input("\n👤 You: ").strip()
+                # Show current session name in prompt
+                session_info = self.db.get_session_info(self.session_id)
+                current_session_name = session_info["session_name"]
+                if not current_session_name:
+                    current_session_name = "New Session"
+                # Truncate long session names for prompt
+                prompt_name = (
+                    current_session_name[:20] + "..."
+                    if len(current_session_name) > 20
+                    else current_session_name
+                )
+
+                user_input = input(f"\n👤 You ({prompt_name}): ").strip()
 
                 if not user_input:
                     continue
@@ -121,8 +298,27 @@ class AIChat:
                 elif user_input.lower() == "/sessions":
                     self.list_all_sessions()
                     continue
+                elif user_input.lower() == "/switch":
+                    self.switch_session()
+                    continue
                 elif user_input.lower() == "/new":
                     self.session_id = self.create_new_session()
+                    print("✅ Now in new session")
+                    continue
+                elif user_input.lower() == "/clear":
+                    confirm = (
+                        input("⚠️ Are you sure you want to clear this session? (y/N): ")
+                        .strip()
+                        .lower()
+                    )
+                    if confirm in ["y", "yes"]:
+                        self.db.clear_session(self.session_id)
+                        print("🗑️ Session cleared!")
+                        # Create a new session
+                        self.session_id = self.create_new_session()
+                        print("✅ Started fresh session")
+                    else:
+                        print("❌ Clear cancelled.")
                     continue
 
                 # Send message to AI
@@ -135,4 +331,4 @@ class AIChat:
                 break
             except Exception as e:
                 print(f"❌ Error: {str(e)}")
-                continue
+                break
