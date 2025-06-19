@@ -6,6 +6,7 @@ from google import genai
 from google.genai import types
 
 from db.conversation import ConversationDB
+from db.user import UserDB
 from tools.weather import fetch_current_weather
 
 
@@ -15,6 +16,7 @@ class AIChat:
             api_key=os.environ.get("GEMINI_API_KEY"),
         )
         self.db = ConversationDB()
+        self.user_db = UserDB()
         self.session_id = self.create_new_session()
 
     def create_new_session(self) -> str:
@@ -121,7 +123,7 @@ Generate only a concise title without quotes or extra text."""
         generate_content_config = types.GenerateContentConfig(
             response_mime_type="text/plain",
             # https://cloud.google.com/vertex-ai/generative-ai/docs/grounding/overview
-            tools=[fetch_current_weather],
+            tools=[fetch_current_weather, self.user_db.search_users],
         )
 
         try:
