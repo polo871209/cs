@@ -4,12 +4,9 @@ from datetime import datetime
 
 from google import genai
 from google.genai import types
-from google.genai.types import (
-    GoogleSearch,
-    Tool,
-)
 
 from db.conversation import ConversationDB
+from tools.weather import fetch_current_weather
 
 
 class AIChat:
@@ -124,7 +121,7 @@ Generate only a concise title without quotes or extra text."""
         generate_content_config = types.GenerateContentConfig(
             response_mime_type="text/plain",
             # https://cloud.google.com/vertex-ai/generative-ai/docs/grounding/overview
-            tools=[Tool(google_search=GoogleSearch())],
+            tools=[fetch_current_weather],
         )
 
         try:
