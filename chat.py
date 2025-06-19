@@ -4,8 +4,12 @@ from datetime import datetime
 
 from google import genai
 from google.genai import types
+from google.genai.types import (
+    GoogleSearch,
+    Tool,
+)
 
-from db import ConversationDB
+from db.conversation import ConversationDB
 
 
 class AIChat:
@@ -111,7 +115,7 @@ Generate only a concise title without quotes or extra text."""
 
         return contents
 
-    def send_message(self, user_input: str) -> str:
+    def send_message(self, user_input: str):
         """Send message to AI and store in database"""
         # Build conversation contents with proper structure
         contents = self.build_conversation_contents(user_input)
@@ -119,17 +123,29 @@ Generate only a concise title without quotes or extra text."""
         # Configure response format
         generate_content_config = types.GenerateContentConfig(
             response_mime_type="text/plain",
+            # https://cloud.google.com/vertex-ai/generative-ai/docs/grounding/overview
+            tools=[Tool(google_search=GoogleSearch())],
         )
 
         try:
-            # Get AI response
-            response = self.client.models.generate_content(
+            # Get AI response with streaming
+            stream = self.client.models.generate_content_stream(
                 model="gemini-2.0-flash",
                 contents=contents,
                 config=generate_content_config,
             )
 
-            ai_response = response.text
+            # Display streaming response and accumulate full text
+            full_response = ""
+            for chunk in stream:
+                if chunk.text:
+                    print(chunk.text, end="", flush=True)
+                    full_response += chunk.text
+
+            print()  # Add newline after streaming is complete
+
+            # Use accumulated response as ai_response
+            ai_response = full_response if full_response else ""
 
             if not ai_response:
                 ai_response = ""
@@ -144,7 +160,6 @@ Generate only a concise title without quotes or extra text."""
                 session_name = self.generate_session_name(user_input, ai_response)
                 if session_name:  # Only update if we got a valid name
                     self.db.update_session_name(self.session_id, session_name)
-            return ai_response
 
         except Exception as e:
             error_msg = f"Error getting AI response: {str(e)}"
@@ -340,8 +355,7 @@ Generate only a concise title without quotes or extra text."""
 
                 # Send message to AI
                 print("🤖 AI: ", end="", flush=True)
-                ai_response = self.send_message(user_input)
-                print(ai_response)
+                self.send_message(user_input)
 
             except KeyboardInterrupt:
                 print("\n\n👋 Chat interrupted. Goodbye!")

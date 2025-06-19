@@ -2,6 +2,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from . import DB
+
 
 @dataclass
 class Session:
@@ -19,8 +21,8 @@ class ConversationDB:
     and allowing users to switch between different conversation contexts.
     """
 
-    def __init__(self, db_path: str = "conversations.db"):
-        self.db_path = db_path
+    def __init__(self):
+        self.db_path = DB
         self.init_database()
 
     def init_database(self):
