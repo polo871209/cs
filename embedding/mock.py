@@ -11,7 +11,7 @@ from google.genai import types
 
 chroma_client = chromadb.Client()
 google_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-    api_key=os.environ.get("GEMINI_API_KEY"),
+    api_key=os.getenv("GEMINI_API_KEY"),
 )
 
 # Create collection with embedding function
@@ -73,7 +73,7 @@ print("\n" + "=" * 50 + "\n")
 
 # Setup Gemini client
 client = genai.Client(
-    api_key=os.environ.get("GEMINI_API_KEY"),
+    api_key=os.getenv("GEMINI_API_KEY"),
 )
 
 # Prepare context from vector search results

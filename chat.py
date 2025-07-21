@@ -1,5 +1,4 @@
 import os
-import uuid
 from datetime import datetime
 
 from google import genai
@@ -13,7 +12,7 @@ from tools.weather import fetch_current_weather
 class AIChat:
     def __init__(self):
         self.client = genai.Client(
-            api_key=os.environ.get("GEMINI_API_KEY"),
+            api_key=os.getenv("GEMINI_API_KEY"),
         )
         self.db = ConversationDB()
         self.user_db = UserDB()
@@ -21,6 +20,7 @@ class AIChat:
 
     def create_new_session(self) -> str:
         """Create a new unique session ID"""
+        import uuid
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         # Create session in database
         self.db.create_session(session_id)
@@ -28,61 +28,58 @@ class AIChat:
         return session_id
 
     def generate_session_name(self, user_input: str, ai_response: str) -> str:
-        """Generate a session name based on the first conversation"""
+        """Generate a session name using AI to summarize the conversation topic"""
+        if not user_input or not ai_response:
+            return "New Conversation"
+
         try:
-            # Ensure inputs are not None
-            if not user_input or not ai_response:
-                return "New Conversation"
+            # Use AI to generate a concise session name
+            summary_prompt = f"""Create a short, descriptive title (2-4 words) for this conversation topic. Return only the title, no quotes or extra text.
 
-            # Create a prompt to generate a short summary
-            summary_prompt = f"""Based on this conversation, create a short 3-5 word title:
-User: {user_input}
-AI: {ai_response}
+User: {user_input[:200]}
+AI: {ai_response[:200]}
 
-Generate only a concise title without quotes or extra text."""
+Title:"""
 
+            # Create simple content for summarization
             contents = [
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_text(text=summary_prompt),
-                    ],
+                    parts=[types.Part.from_text(text=summary_prompt)],
                 )
             ]
 
-            config = types.GenerateContentConfig(
-                response_mime_type="text/plain",
-            )
-
+            # Generate session name with AI
             response = self.client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=contents,
-                config=config,
+                config=types.GenerateContentConfig(
+                    response_mime_type="text/plain",
+                    max_output_tokens=20,  # Keep it short
+                )
             )
 
-            # Clean up the response
-            if response and hasattr(response, "text") and response.text:
-                session_name = response.text.strip().replace('"', "").replace("'", "")
-                # Ensure we have a valid string
-                if not session_name or len(session_name.strip()) == 0:
-                    session_name = "New Conversation"
+            if response and response.text:
+                session_name = response.text.strip()
+                # Clean up the response and ensure it's reasonable length
+                session_name = session_name.replace('"', '').replace("'", "")
+                if len(session_name) > 50:
+                    session_name = session_name[:47] + "..."
+                return session_name if session_name else self._fallback_session_name(user_input)
             else:
-                session_name = "New Conversation"
-
-            # Limit to reasonable length
-            if len(session_name) > 50:
-                session_name = session_name[:47] + "..."
-
-            return session_name
+                return self._fallback_session_name(user_input)
 
         except Exception as e:
-            print(f"⚠️ Could not generate session name: {e}")
-            # Fallback to first few words of user input
-            if user_input:
-                words = user_input.split()[:3]
-                return " ".join(words) + ("..." if len(user_input.split()) > 3 else "")
-            else:
-                return "New Conversation"
+            print(f"⚠️ AI session naming failed, using fallback: {str(e)}")
+            return self._fallback_session_name(user_input)
+
+    def _fallback_session_name(self, user_input: str) -> str:
+        """Fallback method for generating session names"""
+        try:
+            words = user_input.split()[:3]
+            return " ".join(words) + ("..." if len(user_input.split()) > 3 else "")
+        except Exception:
+            return "New Conversation"
 
     def build_conversation_contents(self, user_input: str) -> list:
         """Build conversation contents using genai types structure"""
