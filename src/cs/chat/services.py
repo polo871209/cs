@@ -66,6 +66,19 @@ class MessageHandler:
 
         return contents
 
+    def get_session_token_count(self, session_id: str) -> int:
+        """Calculate total token count for a session by approximating from text length"""
+        history = self.conversation_repo.get_conversation_history(session_id)
+        total_chars = 0
+        
+        for msg in history:
+            total_chars += len(msg.get('content', ''))
+        
+        # Rough approximation: 1 token ≈ 4 characters for English text
+        # This is a simplified estimate since we don't have exact token counts from history
+        estimated_tokens = total_chars // 4
+        return estimated_tokens
+
     def send_message(self, session_id: str, user_input: str) -> str:
         """Send message to AI and store in database"""
         contents = self.build_conversation_contents(session_id, user_input)
@@ -84,6 +97,11 @@ class MessageHandler:
 
             # Check if we're in an interactive terminal
             is_tty = sys.stdout.isatty()
+            
+            # Initialize token counting
+            total_tokens = 0
+            input_tokens = 0
+            output_tokens = 0
 
             if is_tty:
                 # Use Rich Live for real-time markdown rendering
@@ -97,6 +115,16 @@ class MessageHandler:
                             full_response += chunk.text
                             # Update with live markdown rendering
                             live.update(Markdown(full_response))
+                        
+                        # Collect token usage if available
+                        if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                            usage = chunk.usage_metadata
+                            if hasattr(usage, 'prompt_token_count'):
+                                input_tokens = usage.prompt_token_count
+                            if hasattr(usage, 'candidates_token_count'):
+                                output_tokens = usage.candidates_token_count
+                            if hasattr(usage, 'total_token_count'):
+                                total_tokens = usage.total_token_count
 
                 # Final check for empty response
                 if not full_response.strip():
@@ -108,6 +136,16 @@ class MessageHandler:
                     if chunk.text:
                         print(chunk.text, end="", flush=True)
                         full_response += chunk.text
+                    
+                    # Collect token usage if available
+                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                        usage = chunk.usage_metadata
+                        if hasattr(usage, 'prompt_token_count'):
+                            input_tokens = usage.prompt_token_count
+                        if hasattr(usage, 'candidates_token_count'):
+                            output_tokens = usage.candidates_token_count
+                        if hasattr(usage, 'total_token_count'):
+                            total_tokens = usage.total_token_count
                 print()  # Final newline
 
             ai_response = full_response if full_response else ""
@@ -115,6 +153,16 @@ class MessageHandler:
             # Store both messages in database
             self.conversation_repo.add_message(session_id, "user", user_input)
             self.conversation_repo.add_message(session_id, "assistant", ai_response)
+
+            # Display token usage information
+            if total_tokens > 0:
+                # Get session total tokens
+                session_total = self.get_session_token_count(session_id)
+                token_info = f"📊 Tokens: {input_tokens} in + {output_tokens} out = {total_tokens} total | Session: {session_total}"
+                if is_tty:
+                    self.console.print(f"\n{token_info}", style="dim cyan")
+                else:
+                    print(f"\n{token_info}")
 
             # Generate session name if this is the first message in the session
             history = self.conversation_repo.get_conversation_history(session_id)
