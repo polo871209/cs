@@ -230,6 +230,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "google-generativeai" },
     { name = "requests" },
+    { name = "rich" },
 ]
 
 [package.metadata]
@@ -238,6 +239,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.20.0" },
     { name = "google-generativeai", specifier = ">=0.8.5" },
     { name = "requests", specifier = ">=2.32.4" },
+    { name = "rich", specifier = ">=13.0.0" },
 ]
 
 [[package]]
