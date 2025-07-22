@@ -3,17 +3,17 @@
 ## Project Structure (Modern Python Layout)
 - **Source code**: `src/cs/` - All application code in importable package
 - **Entry point**: `main.py` or `uv run main.py`
-- **Tests**: `tests/` with pytest structure (unit/, integration/)
-- **Docs**: `docs/` for documentation
+- **Tests**: No test directory currently exists - create `tests/` with pytest structure if needed
+- **Database**: SQLite database at `cs.db` in project root
 
 ## Build/Lint/Test Commands
 - **Run app**: `just run` or `uv run main.py`
-- **Install**: `uv sync` or `uv install`
-- **Test all**: `uv run python -m pytest tests/ -v`
+- **Install**: `uv sync` (preferred) or `uv install`
+- **Test all**: Create tests dir first, then `uv run python -m pytest tests/ -v`
 - **Test single**: `uv run python -m pytest tests/unit/test_file.py::test_function -v`
-- **Lint**: `uv run ruff check src/`
+- **Lint**: `uv run ruff check src/` (no ruff config found - uses defaults)
 - **Format**: `uv run ruff format src/`
-- **Type check**: `uv run pyright src/` (typeCheckingMode=off)
+- **Type check**: `uv run pyright src/` (typeCheckingMode=off in pyproject.toml)
 - **Clean database**: `just clean` (removes cs.db file)
 
 ## Code Style & Conventions
@@ -26,10 +26,10 @@
 
 ### Python Standards
 - **Package structure**: Use `src/` layout with proper `__init__.py` files
-- **Type hints**: Use modern syntax (`str | None`, `Optional[str]`) - Python 3.13+
-- **Imports**: Relative imports within package (`.config`, `..database`)
-- **Models**: Dataclasses in `src/cs/database/models/entities.py`
-- **Line length**: 88 characters (ruff configured)
+- **Type hints**: Use modern syntax (`str | None`) and `Optional[str]` from typing - Python 3.13+
+- **Imports**: Standard imports (not relative) - import from `src.cs.module`
+- **Models**: Dataclasses in `src/cs/database/models/entities.py` with docstrings
+- **Line length**: Default ruff settings (88 characters)
 
 ### Naming & Organization
 - **Modules**: snake_case.py (e.g., `chat_app.py`, `gemini_client.py`)
